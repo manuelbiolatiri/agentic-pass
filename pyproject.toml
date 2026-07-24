@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pass-mcp"
+version = "1.0.0"
+description = "Model Context Protocol (MCP) Server & Python Client for Apple & Google Wallet Pass Delegation"
+authors = [{ name = "Emmanuel Biolatiri" }]
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.28.0",
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.6.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pass_mcp*"]
+
+[project.scripts]
+pass-mcp = "pass_mcp.mcp_server:main"
+pass-mcp-api = "pass_mcp.api:main"
