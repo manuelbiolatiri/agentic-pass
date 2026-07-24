@@ -59,12 +59,28 @@ async def issue_mandate(
     authorization_details: List[Dict[str, Any]],
     ttl_seconds: int = 3600,
 ) -> str:
-    """Issue a signed RFC 8693 delegation mandate token for an AI agent (Principal / Admin tool)."""
+    """
+    Issue a signed RFC 8693 delegation mandate token for an AI agent (Principal / Admin tool).
+    authorization_details array format: [{'type': 'event_ticket', 'pass_class': 'event_ticket', 'max_quantity': 2}]
+    """
     try:
+        normalized_details = []
+        sys.stderr.write(f"[pass-mcp] authorization_details ==> {authorization_details}\n")
+        for detail in authorization_details:
+            if isinstance(detail, dict):
+                d = dict(detail)
+                if "pass_class" not in d and "type" in d:
+                    d["pass_class"] = d["type"]
+                if "max_quantity" not in d and "quantity" in d:
+                    d["max_quantity"] = d["quantity"]
+                normalized_details.append(d)
+            else:
+                normalized_details.append(detail)
+
         result = await client.issue_mandate(
             principal_id=principal_id,
             agent_id=agent_id,
-            authorization_details=authorization_details,
+            authorization_details=normalized_details,
             ttl_seconds=ttl_seconds,
         )
         return json.dumps(result, indent=2)

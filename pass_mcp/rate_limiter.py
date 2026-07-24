@@ -8,7 +8,7 @@ from typing import Tuple
 CONFIG_DIR = Path.home() / ".pass_mcp"
 DEVICE_ID_FILE = CONFIG_DIR / "device_id"
 USAGE_FILE = CONFIG_DIR / "usage.json"
-DAILY_FREE_PASS_LIMIT = 10
+DAILY_FREE_PASS_LIMIT = 100
 
 def get_or_create_device_id() -> str:
     """Gets or generates a persistent device/installer UUID."""
