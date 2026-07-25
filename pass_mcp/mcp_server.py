@@ -8,6 +8,20 @@ from pass_mcp.client import WalletKitPassClient
 mcp = FastMCP("pass-mcp")
 client = WalletKitPassClient()
 
+def format_pass_result(result: Any) -> str:
+    """Formats pass responses into clean JSON with embedded Markdown image tags for visual previews."""
+    try:
+        json_str = json.dumps(result, indent=2)
+        if isinstance(result, dict):
+            pass_obj = result.get("pass") or (result if "urls" in result else None)
+            if isinstance(pass_obj, dict):
+                qr_url = pass_obj.get("urls", {}).get("qrCodeUrl")
+                if qr_url:
+                    return f"![Digital Pass Barcode QR]({qr_url})\n\n" + json_str
+        return json_str
+    except Exception:
+        return json.dumps(result, indent=2)
+
 @mcp.tool()
 async def request_pass(
     mandate_token: str,
@@ -30,7 +44,7 @@ async def request_pass(
             spend=spend,
             purpose=purpose,
         )
-        return json.dumps(result, indent=2)
+        return format_pass_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 
@@ -107,7 +121,7 @@ async def lookup_pass(pass_id: str) -> str:
     """Lookup full details of a specific pass by passId or serialNumber."""
     try:
         result = await client.lookup_pass(pass_id=pass_id)
-        return json.dumps(result, indent=2)
+        return format_pass_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 
