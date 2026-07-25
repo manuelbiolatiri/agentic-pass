@@ -60,6 +60,8 @@ async def test_mcp_stdio_server_communication():
     assert "check_mandate_status" in tool_names
     assert "poll_escalation" in tool_names
     assert "issue_mandate" in tool_names
+    assert "get_holder_passes" in tool_names
+    assert "lookup_pass" in tool_names
 
     # Terminate server process cleanly
     proc.terminate()

@@ -110,3 +110,20 @@ class WalletKitPassClient:
             response = await client.post("/api/v1/mandates/revoke", json=payload, headers=self._get_headers())
             response.raise_for_status()
             return self._unwrap(response)
+
+    async def get_holder_passes(self, external_user_id: Optional[str] = None, mandate_token: Optional[str] = None) -> Dict[str, Any]:
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
+            params = {}
+            if external_user_id:
+                params["externalUserId"] = external_user_id
+            if mandate_token:
+                params["token"] = mandate_token
+            response = await client.get("/api/v1/mandates/holder-passes", params=params, headers=self._get_headers())
+            response.raise_for_status()
+            return self._unwrap(response)
+
+    async def lookup_pass(self, pass_id: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
+            response = await client.get("/api/v1/mandates/pass-lookup", params={"passId": pass_id}, headers=self._get_headers())
+            response.raise_for_status()
+            return self._unwrap(response)

@@ -87,6 +87,30 @@ async def issue_mandate(
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 
+@mcp.tool()
+async def get_holder_passes(
+    external_user_id: Optional[str] = None,
+    mandate_token: Optional[str] = None,
+) -> str:
+    """Get all active Apple & Google Wallet passes held by a human principal / user."""
+    try:
+        result = await client.get_holder_passes(
+            external_user_id=external_user_id,
+            mandate_token=mandate_token,
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, indent=2)
+
+@mcp.tool()
+async def lookup_pass(pass_id: str) -> str:
+    """Lookup full details of a specific pass by passId or serialNumber."""
+    try:
+        result = await client.lookup_pass(pass_id=pass_id)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, indent=2)
+
 def main():
     """Main entrypoint running Pass-MCP server over Stdio transport."""
     mcp.run(transport="stdio")
