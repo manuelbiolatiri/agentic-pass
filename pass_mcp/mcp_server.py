@@ -9,15 +9,15 @@ mcp = FastMCP("pass-mcp")
 client = WalletKitPassClient()
 
 def format_pass_result(result: Any) -> str:
-    """Formats pass responses into clean JSON with embedded Markdown image tags for visual previews."""
+    """Formats pass responses into clean JSON with visual pass card preview image markdown."""
     try:
         json_str = json.dumps(result, indent=2)
         if isinstance(result, dict):
             pass_obj = result.get("pass") or (result if "urls" in result else None)
             if isinstance(pass_obj, dict):
-                qr_url = pass_obj.get("urls", {}).get("qrCodeUrl")
-                if qr_url:
-                    return f"![Digital Pass Barcode QR]({qr_url})\n\n" + json_str
+                card_url = pass_obj.get("urls", {}).get("previewCardUrl")
+                if card_url:
+                    return f"![Pass Visual Card]({card_url})\n\n" + json_str
         return json_str
     except Exception:
         return json.dumps(result, indent=2)
@@ -112,7 +112,7 @@ async def get_holder_passes(
             external_user_id=external_user_id,
             mandate_token=mandate_token,
         )
-        return json.dumps(result, indent=2)
+        return format_pass_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 
