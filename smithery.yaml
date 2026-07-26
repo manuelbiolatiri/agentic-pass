@@ -1,0 +1,8 @@
+# smithery.yaml configuration for pass-mcp
+startCommand:
+  type: stdio
+  config:
+    command: "uvx"
+    args: ["pass-mcp"]
+  env:
+    WALLETKIT_API_URL: "https://passera-service-production.up.railway.app"
