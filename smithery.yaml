@@ -6,3 +6,12 @@ startCommand:
     args: ["pass-mcp"]
   env:
     WALLETKIT_API_URL: "https://passera-service-production.up.railway.app"
+configSchema:
+  type: object
+  properties:
+    WALLETKIT_API_KEY:
+      type: string
+      description: "Optional merchant API key for unlimited pass signing"
+    WALLETKIT_API_URL:
+      type: string
+      description: "WalletKit API Endpoint URL"

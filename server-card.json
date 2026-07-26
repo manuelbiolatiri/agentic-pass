@@ -1,0 +1,44 @@
+{
+  "name": "manuelbiolatiri/pass-mcp",
+  "description": "Issue, delegate, and manage Apple Wallet (.pkpass) and Google Wallet passes under signed RFC 8693 delegation mandates with 100 free daily passes.",
+  "publisher": "manuelbiolatiri",
+  "repository": "https://github.com/manuelbiolatiri/pass-mcp",
+  "license": "MIT",
+  "runtime": "python",
+  "startCommand": {
+    "type": "stdio",
+    "config": {
+      "command": "uvx",
+      "args": ["pass-mcp"]
+    },
+    "env": {
+      "WALLETKIT_API_URL": "https://passera-service-production.up.railway.app"
+    }
+  },
+  "tools": [
+    {
+      "name": "issue_mandate",
+      "description": "Issue a signed RFC 8693 delegation mandate token for an AI agent."
+    },
+    {
+      "name": "request_pass",
+      "description": "Request an Apple Wallet (.pkpass) or Google Wallet pass under a delegation token."
+    },
+    {
+      "name": "get_holder_passes",
+      "description": "Get all active Apple & Google Wallet passes held by a human principal."
+    },
+    {
+      "name": "lookup_pass",
+      "description": "Lookup full details of a specific pass by passId or serialNumber."
+    },
+    {
+      "name": "check_mandate_status",
+      "description": "Check live status and remaining lifetime of a delegation token."
+    },
+    {
+      "name": "poll_escalation",
+      "description": "Poll status of a pending CIBA human-in-the-loop escalation request."
+    }
+  ]
+}
