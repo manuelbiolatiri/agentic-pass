@@ -1,10 +1,24 @@
 {
+  "$schema": "https://smithery.ai/schemas/server-card.json",
   "name": "manuelbiolatiri/pass-mcp",
   "description": "Issue, delegate, and manage Apple Wallet (.pkpass) and Google Wallet passes under signed RFC 8693 delegation mandates with 100 free daily passes.",
   "publisher": "manuelbiolatiri",
   "repository": "https://github.com/manuelbiolatiri/pass-mcp",
   "license": "MIT",
   "runtime": "python",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "WALLETKIT_API_KEY": {
+        "type": "string",
+        "description": "Optional merchant API key for unlimited pass signing"
+      },
+      "WALLETKIT_API_URL": {
+        "type": "string",
+        "description": "WalletKit API Endpoint URL"
+      }
+    }
+  },
   "startCommand": {
     "type": "stdio",
     "config": {
