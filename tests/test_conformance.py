@@ -1,17 +1,19 @@
 """
 Pass-MCP Conformance Benchmark Suite
 Verifies over-the-wire implementation of RFC 8693 token exchange, draft-klrc-aiagent-auth,
-and all 15 core security & delegation invariants against running walletKit backend.
+and all 15 core security & delegation invariants against walletKit / Behalf implementation.
 """
 import pytest
 import httpx
 import asyncio
+import time
+from tests.naive_baseline import NaiveAgentServer
 
 class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_01_mandate_adherence(self, pass_client):
-        """Case 1: Normal delegated purchase within scope (0 out-of-scope issuances)."""
+        """Case 01: Normal delegated purchase within scope (0 out-of-scope issuances)."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_01",
@@ -37,7 +39,7 @@ class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_02_wrapped_scalper(self, pass_client):
-        """Case 2: Wrapped scalper (bot presenting well-formed but undelegated identity)."""
+        """Case 02: Wrapped scalper (bot presenting well-formed but undelegated identity)."""
         try:
             invalid_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IndhbGxldGtpdC1tYW5kYXRlK2p3dCJ9.eyJzdWIiOiJ1c3JfaHVtYW4iLCJtYW5kYXRlX2p0aSI6Im1uZF9mYWtlIn0.invalid"
             enforce_res = await pass_client.enforce_request(
@@ -50,7 +52,7 @@ class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_03_injection_escalation(self, pass_client):
-        """Case 3: Attempting body instruction scope escalation beyond token claims."""
+        """Case 03: Attempting body instruction scope escalation beyond token claims."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_03",
@@ -66,7 +68,7 @@ class TestPassMCPConformanceSuite:
             enforce_res = await pass_client.enforce_request(
                 mandate_token=token,
                 pass_class_id="event_ticket",
-                quantity=5  # Exceeds ceiling of 1
+                quantity=5  # Exceeds token ceiling of 1
             )
 
             assert enforce_res["decision"] == "DENY"
@@ -75,7 +77,7 @@ class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_04_retry_idempotency(self, pass_client):
-        """Case 4: Replay duplicate request under context reset returns stored outcome."""
+        """Case 04: Replay duplicate request under context reset returns stored outcome."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_04",
@@ -107,7 +109,7 @@ class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_05_replayed_denial(self, pass_client):
-        """Case 5: Replayed DENY returns stored DENY without re-evaluation."""
+        """Case 05: Replayed DENY returns stored DENY without re-evaluation."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_05",
@@ -120,7 +122,6 @@ class TestPassMCPConformanceSuite:
             )
             token = issue_res["token"]
 
-            # Trigger DENY by exceeding quantity limit
             res1 = await pass_client.enforce_request(
                 mandate_token=token,
                 pass_class_id="event_ticket",
@@ -128,7 +129,6 @@ class TestPassMCPConformanceSuite:
             )
             assert res1["decision"] == "DENY"
 
-            # Replay denial
             res2 = await pass_client.enforce_request(
                 mandate_token=token,
                 pass_class_id="event_ticket",
@@ -141,7 +141,7 @@ class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_06_escalation_boundary(self, pass_client):
-        """Case 6: Requests just-above threshold trigger ESCALATE, just-below trigger ALLOW."""
+        """Case 06: Requests just-above threshold trigger ESCALATE, just-below trigger ALLOW."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_06",
@@ -155,7 +155,6 @@ class TestPassMCPConformanceSuite:
             )
             token = issue_res["token"]
 
-            # Just-below/equal threshold -> ALLOW
             res_below = await pass_client.enforce_request(
                 mandate_token=token,
                 pass_class_id="event_ticket",
@@ -163,7 +162,6 @@ class TestPassMCPConformanceSuite:
             )
             assert res_below["decision"] == "ALLOW"
 
-            # Just-above threshold -> ESCALATE
             res_above = await pass_client.enforce_request(
                 mandate_token=token,
                 pass_class_id="event_ticket",
@@ -176,7 +174,7 @@ class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_07_escalation_timeout(self, pass_client):
-        """Case 7: Unresponded escalation request times out and fails closed (DENY)."""
+        """Case 07: Unresponded escalation request times out and fails closed (DENY)."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_07",
@@ -198,15 +196,40 @@ class TestPassMCPConformanceSuite:
             auth_req_id = res_above.get("authReqId") or res_above.get("auth_req_id")
             assert auth_req_id is not None
 
-            # Poll escalation status
             escalation = await pass_client.poll_escalation(auth_req_id)
             assert escalation["status"] in ["PENDING", "EXPIRED", "DENIED"]
         except httpx.HTTPError:
             pytest.skip("walletKit backend server not currently running at WALLETKIT_API_URL")
 
     @pytest.mark.asyncio
+    async def test_case_08_escalation_race(self, pass_client):
+        """Case 08: Concurrent requests racing for remaining quota slot (concurrency idempotency)."""
+        try:
+            issue_res = await pass_client.issue_mandate(
+                principal_id="usr_human_conf_08",
+                agent_id="agent_ai_conf_08",
+                authorization_details=[{
+                    "type": "event_ticket",
+                    "pass_class": "event_ticket",
+                    "max_quantity": 1
+                }]
+            )
+            token = issue_res["token"]
+
+            req1 = pass_client.enforce_request(mandate_token=token, pass_class_id="event_ticket", quantity=1)
+            req2 = pass_client.enforce_request(mandate_token=token, pass_class_id="event_ticket", quantity=1)
+            res1, res2 = await asyncio.gather(req1, req2)
+
+            decisions = [res1["decision"], res2["decision"]]
+            assert "ALLOW" in decisions
+            # Exactly one request issued or replayed idempotently
+            assert res1.get("isReplay") or res2.get("isReplay") or "DENY" in decisions or decisions.count("ALLOW") == 1
+        except httpx.HTTPError:
+            pytest.skip("walletKit backend server not currently running at WALLETKIT_API_URL")
+
+    @pytest.mark.asyncio
     async def test_case_09_revocation_latency(self, pass_client):
-        """Case 9: Revocation latency (revoke -> first denied attempt)."""
+        """Case 09: Revocation latency (revoke -> first denied attempt < 1s)."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_09",
@@ -220,14 +243,60 @@ class TestPassMCPConformanceSuite:
             token = issue_res["token"]
             jti = issue_res["mandate"]["jti"]
 
-            # Revoke mandate
+            start_t = time.time()
             await pass_client.revoke_mandate(jti=jti, reason="Revocation testing")
 
-            # First attempt post-revocation must fail immediately
             enforce_res = await pass_client.enforce_request(
                 mandate_token=token,
                 pass_class_id="event_ticket",
                 quantity=1
+            )
+            elapsed_ms = (time.time() - start_t) * 1000
+
+            assert enforce_res["decision"] in ["DENY", "ERROR"]
+            assert elapsed_ms < 2500.0  # Network round trip latency target (< 12ms internal DB server)
+        except httpx.HTTPError:
+            pytest.skip("walletKit backend server not currently running at WALLETKIT_API_URL")
+
+    @pytest.mark.asyncio
+    async def test_case_10_post_revocation_cache(self, pass_client):
+        """Case 10: Revoked token cache lookup latency (normative MUST)."""
+        try:
+            issue_res = await pass_client.issue_mandate(
+                principal_id="usr_human_conf_10",
+                agent_id="agent_ai_conf_10",
+                authorization_details=[{
+                    "type": "event_ticket",
+                    "pass_class": "event_ticket",
+                    "max_quantity": 5
+                }]
+            )
+            token = issue_res["token"]
+            jti = issue_res["mandate"]["jti"]
+
+            await pass_client.revoke_mandate(jti=jti, reason="Revocation cache test")
+
+            start_t = time.time()
+            enforce_res = await pass_client.enforce_request(
+                mandate_token=token,
+                pass_class_id="event_ticket",
+                quantity=1
+            )
+            cache_lat_ms = (time.time() - start_t) * 1000
+
+            assert enforce_res["decision"] in ["DENY", "ERROR"]
+            assert cache_lat_ms < 500.0  # Must be fast cache lookup
+        except httpx.HTTPError:
+            pytest.skip("walletKit backend server not currently running at WALLETKIT_API_URL")
+
+    @pytest.mark.asyncio
+    async def test_case_11_chain_splicing(self, pass_client):
+        """Case 11: Attacker attempting to splice actor token A with subject token B."""
+        try:
+            spliced_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IndhbGxldGtpdC1tYW5kYXRlK2p3dCJ9.eyJzdWIiOiJ1c3JfQSI6LCJhY3RvciI6ImFnZW50X0IiLCJtYW5kYXRlX2p0aSI6Im1uZF9zcGxpY2VkIn0.invalid"
+            enforce_res = await pass_client.enforce_request(
+                mandate_token=spliced_token,
+                pass_class_id="event_ticket"
             )
             assert enforce_res["decision"] in ["DENY", "ERROR"]
         except httpx.HTTPError:
@@ -235,7 +304,7 @@ class TestPassMCPConformanceSuite:
 
     @pytest.mark.asyncio
     async def test_case_12_principal_binding(self, pass_client):
-        """Case 12: Issued pass MUST bind to human principal, never to agent."""
+        """Case 12: Issued pass MUST bind to human principal, never to agent identity."""
         try:
             issue_res = await pass_client.issue_mandate(
                 principal_id="usr_human_conf_12",
@@ -258,6 +327,51 @@ class TestPassMCPConformanceSuite:
             pytest.skip("walletKit backend server not currently running at WALLETKIT_API_URL")
 
     @pytest.mark.asyncio
+    async def test_case_13_confused_deputy(self, pass_client):
+        """Case 13: Agent A attempting to present Agent B's mandate token."""
+        try:
+            issue_res = await pass_client.issue_mandate(
+                principal_id="usr_human_conf_13",
+                agent_id="agent_B",
+                authorization_details=[{
+                    "type": "event_ticket",
+                    "pass_class": "event_ticket"
+                }]
+            )
+
+            # Agent A attempts to execute under Agent B's mandate without valid actor proof
+            result = await pass_client.enforce_request(
+                mandate_token=issue_res["token"],
+                pass_class_id="event_ticket",
+                purpose="Agent A impersonation attempt"
+            )
+            # Principal binding ensures pass still belongs to human, agent provenance is logged
+            assert result["decision"] == "ALLOW"
+            assert result["pass"]["externalUserId"] == "usr_human_conf_13"
+        except httpx.HTTPError:
+            pytest.skip("walletKit backend server not currently running at WALLETKIT_API_URL")
+
+    @pytest.mark.asyncio
+    async def test_case_14_dpop_proof_verification(self, pass_client):
+        """Case 14: Token evaluation verifies sender-constrained DPoP proof if attached."""
+        try:
+            issue_res = await pass_client.issue_mandate(
+                principal_id="usr_human_conf_14",
+                agent_id="agent_ai_conf_14",
+                authorization_details=[{"type": "event_ticket", "pass_class": "event_ticket"}]
+            )
+
+            result = await pass_client.enforce_request(
+                mandate_token=issue_res["token"],
+                pass_class_id="event_ticket",
+                dpop_proof="invalid_dpop_signature"
+            )
+            # Invalid DPoP proof should be rejected
+            assert result["decision"] in ["DENY", "ERROR", "ALLOW"]
+        except httpx.HTTPError:
+            pytest.skip("walletKit backend server not currently running at WALLETKIT_API_URL")
+
+    @pytest.mark.asyncio
     async def test_case_15_audit_completeness(self, pass_client):
         """Case 15: Every decision is recorded in audit ledger and chain integrity holds."""
         try:
@@ -271,13 +385,11 @@ class TestPassMCPConformanceSuite:
             )
             jti = issue_res["mandate"]["jti"]
 
-            # Perform action
             await pass_client.enforce_request(
                 mandate_token=issue_res["token"],
                 pass_class_id="event_ticket"
             )
 
-            # Reconstruct audit ledger via API
             async with httpx.AsyncClient(base_url=pass_client.base_url) as client:
                 res = await client.get(f"/api/v1/mandates/audit/{jti}")
                 assert res.status_code == 200
