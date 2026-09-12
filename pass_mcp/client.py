@@ -12,14 +12,14 @@ class WalletKitPassClient:
         self.api_key = api_key or os.getenv("WALLETKIT_API_KEY")
         self.device_id = get_or_create_device_id()
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self, api_key_override: Optional[str] = None) -> Dict[str, str]:
         headers = {
             "X-Pass-MCP-Device-Id": self.device_id,
             "Content-Type": "application/json",
         }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-            headers["X-WalletKit-Api-Key"] = self.api_key
+        effective_key = api_key_override or self.api_key
+        if effective_key:
+            headers["X-Api-Key"] = effective_key
         return headers
 
     def _unwrap(self, response: httpx.Response) -> Dict[str, Any]:
@@ -35,11 +35,10 @@ class WalletKitPassClient:
         authorization_details: list,
         agent_jkt: Optional[str] = None,
         ttl_seconds: int = 3600,
+        api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        allowed, msg = check_and_increment_rate_limit(has_api_key=bool(self.api_key))
-        if not allowed:
-            raise PermissionError(msg)
-
+        # No quota check here: issuing a mandate token doesn't create a pass,
+        # so it shouldn't consume the per-day pass-issuance allowance.
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
             payload = {
                 "principalId": principal_id,
@@ -50,7 +49,7 @@ class WalletKitPassClient:
             if agent_jkt:
                 payload["agentJkt"] = agent_jkt
 
-            response = await client.post("/api/v1/mandates/issue", json=payload, headers=self._get_headers())
+            response = await client.post("/api/v1/mandates/issue", json=payload, headers=self._get_headers(api_key))
             response.raise_for_status()
             return self._unwrap(response)
 
@@ -63,8 +62,9 @@ class WalletKitPassClient:
         spend: float = 0,
         purpose: Optional[str] = None,
         dpop_proof: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        allowed, msg = check_and_increment_rate_limit(has_api_key=bool(self.api_key))
+        allowed, msg = check_and_increment_rate_limit(api_key=api_key or self.api_key)
         if not allowed:
             return {
                 "decision": "DENY",
@@ -86,44 +86,68 @@ class WalletKitPassClient:
             if dpop_proof:
                 payload["dpopProof"] = dpop_proof
 
-            response = await client.post("/api/v1/mandates/enforce", json=payload, headers=self._get_headers())
+            response = await client.post("/api/v1/mandates/enforce", json=payload, headers=self._get_headers(api_key))
             response.raise_for_status()
             return self._unwrap(response)
 
-    async def check_mandate_status(self, mandate_token: str) -> Dict[str, Any]:
+    async def check_mandate_status(self, mandate_token: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
-            response = await client.get("/api/v1/mandates/status", params={"token": mandate_token}, headers=self._get_headers())
+            response = await client.get("/api/v1/mandates/status", params={"token": mandate_token}, headers=self._get_headers(api_key))
             response.raise_for_status()
             return self._unwrap(response)
 
-    async def poll_escalation(self, auth_req_id: str) -> Dict[str, Any]:
+    async def poll_escalation(self, auth_req_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
-            response = await client.get(f"/api/v1/mandates/escalations/{auth_req_id}", headers=self._get_headers())
+            response = await client.get(f"/api/v1/mandates/escalations/{auth_req_id}", headers=self._get_headers(api_key))
             response.raise_for_status()
             return self._unwrap(response)
 
-    async def revoke_mandate(self, jti: str, reason: Optional[str] = None) -> Dict[str, Any]:
+    async def respond_to_escalation(
+        self,
+        auth_req_id: str,
+        approved: bool,
+        reason: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
+            payload: Dict[str, Any] = {"approved": approved}
+            if reason:
+                payload["reason"] = reason
+            response = await client.post(
+                f"/api/v1/mandates/escalations/{auth_req_id}/respond",
+                json=payload,
+                headers=self._get_headers(api_key),
+            )
+            response.raise_for_status()
+            return self._unwrap(response)
+
+    async def revoke_mandate(self, jti: str, reason: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
             payload = {"jti": jti}
             if reason:
                 payload["reason"] = reason
-            response = await client.post("/api/v1/mandates/revoke", json=payload, headers=self._get_headers())
+            response = await client.post("/api/v1/mandates/revoke", json=payload, headers=self._get_headers(api_key))
             response.raise_for_status()
             return self._unwrap(response)
 
-    async def get_holder_passes(self, external_user_id: Optional[str] = None, mandate_token: Optional[str] = None) -> Dict[str, Any]:
+    async def get_holder_passes(
+        self,
+        external_user_id: Optional[str] = None,
+        mandate_token: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
             params = {}
             if external_user_id:
                 params["externalUserId"] = external_user_id
             if mandate_token:
                 params["token"] = mandate_token
-            response = await client.get("/api/v1/mandates/holder-passes", params=params, headers=self._get_headers())
+            response = await client.get("/api/v1/mandates/holder-passes", params=params, headers=self._get_headers(api_key))
             response.raise_for_status()
             return self._unwrap(response)
 
-    async def lookup_pass(self, pass_id: str) -> Dict[str, Any]:
+    async def lookup_pass(self, pass_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
-            response = await client.get("/api/v1/mandates/pass-lookup", params={"passId": pass_id}, headers=self._get_headers())
+            response = await client.get("/api/v1/mandates/pass-lookup", params={"passId": pass_id}, headers=self._get_headers(api_key))
             response.raise_for_status()
             return self._unwrap(response)

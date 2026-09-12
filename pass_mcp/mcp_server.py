@@ -30,10 +30,16 @@ async def request_pass(
     quantity: int = 1,
     spend: float = 0,
     purpose: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> str:
     """
     Request a digital wallet pass (Apple Wallet .pkpass / Google Wallet pass) under a signed agent delegation token.
-    Enforces a default free limit of 10 passes per day per installer.
+    Enforces a limit of 100 pass issuances per day, tracked per business (api_key)
+    when one is supplied, or per installer device otherwise.
+
+    api_key: optional merchant API key to act on behalf of that business for this call.
+    Falls back to the server's configured WALLETKIT_API_KEY when omitted, letting one
+    running pass-mcp instance serve multiple businesses per-call.
     """
     try:
         result = await client.enforce_request(
@@ -43,25 +49,54 @@ async def request_pass(
             quantity=quantity,
             spend=spend,
             purpose=purpose,
+            api_key=api_key,
         )
         return format_pass_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 
 @mcp.tool()
-async def check_mandate_status(mandate_token: str) -> str:
+async def check_mandate_status(mandate_token: str, api_key: Optional[str] = None) -> str:
     """Check live status and remaining lifetime of a delegation token."""
     try:
-        result = await client.check_mandate_status(mandate_token=mandate_token)
+        result = await client.check_mandate_status(mandate_token=mandate_token, api_key=api_key)
         return json.dumps(result, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 
 @mcp.tool()
-async def poll_escalation(auth_req_id: str) -> str:
+async def poll_escalation(auth_req_id: str, api_key: Optional[str] = None) -> str:
     """Poll status of a pending CIBA human-in-the-loop escalation request."""
     try:
-        result = await client.poll_escalation(auth_req_id=auth_req_id)
+        result = await client.poll_escalation(auth_req_id=auth_req_id, api_key=api_key)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, indent=2)
+
+@mcp.tool()
+async def respond_to_escalation(
+    auth_req_id: str,
+    approved: bool,
+    reason: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> str:
+    """Approve or deny a pending CIBA human-in-the-loop escalation request (Human Principal action)."""
+    try:
+        result = await client.respond_to_escalation(
+            auth_req_id=auth_req_id,
+            approved=approved,
+            reason=reason,
+            api_key=api_key,
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, indent=2)
+
+@mcp.tool()
+async def revoke_mandate(jti: str, reason: Optional[str] = None, api_key: Optional[str] = None) -> str:
+    """Revoke a mandate immediately by JTI, blocking any further enforcement under it."""
+    try:
+        result = await client.revoke_mandate(jti=jti, reason=reason, api_key=api_key)
         return json.dumps(result, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
@@ -72,10 +107,13 @@ async def issue_mandate(
     agent_id: str,
     authorization_details: List[Dict[str, Any]],
     ttl_seconds: int = 3600,
+    api_key: Optional[str] = None,
 ) -> str:
     """
     Issue a signed RFC 8693 delegation mandate token for an AI agent (Principal / Admin tool).
     authorization_details array format: [{'type': 'event_ticket', 'pass_class': 'event_ticket', 'max_quantity': 2}]
+
+    api_key: optional merchant API key to issue this mandate under that business.
     """
     try:
         normalized_details = []
@@ -96,6 +134,7 @@ async def issue_mandate(
             agent_id=agent_id,
             authorization_details=normalized_details,
             ttl_seconds=ttl_seconds,
+            api_key=api_key,
         )
         return json.dumps(result, indent=2)
     except Exception as e:
@@ -105,22 +144,24 @@ async def issue_mandate(
 async def get_holder_passes(
     external_user_id: Optional[str] = None,
     mandate_token: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> str:
     """Get all active Apple & Google Wallet passes held by a human principal / user."""
     try:
         result = await client.get_holder_passes(
             external_user_id=external_user_id,
             mandate_token=mandate_token,
+            api_key=api_key,
         )
         return format_pass_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 
 @mcp.tool()
-async def lookup_pass(pass_id: str) -> str:
+async def lookup_pass(pass_id: str, api_key: Optional[str] = None) -> str:
     """Lookup full details of a specific pass by passId or serialNumber."""
     try:
-        result = await client.lookup_pass(pass_id=pass_id)
+        result = await client.lookup_pass(pass_id=pass_id, api_key=api_key)
         return format_pass_result(result)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)

@@ -37,16 +37,18 @@ pip install -e .
 
 ## 🛠 Available MCP Tools
 
-`pass-mcp` exposes 6 core tools to Claude Desktop, AutoGPT, and LLM clients over Stdio transport:
+`pass-mcp` exposes 8 core tools to Claude Desktop, AutoGPT, and LLM clients over Stdio transport. Every tool also accepts an optional `api_key` argument, which overrides the server's configured `WALLETKIT_API_KEY` for that single call — this lets one running `pass-mcp` instance act on behalf of a different merchant business per call, instead of being locked to whichever key it was started with.
 
 | Tool Name | Parameters | Description |
 |---|---|---|
-| `issue_mandate` | `principal_id`, `agent_id`, `authorization_details`, `ttl_seconds` | Issue a signed RFC 8693 delegation mandate token for an AI agent. |
-| `request_pass` | `mandate_token`, `pass_class`, `quantity`, `resource`, `spend`, `purpose` | Request Apple/Google Wallet pass issuance under a delegation token. |
-| `get_holder_passes` | `external_user_id`, `mandate_token` | Retrieve all active digital wallet passes held by a human principal. |
-| `lookup_pass` | `pass_id` | Query full details, status, and download URLs for a pass. |
-| `check_mandate_status` | `mandate_token` | Inspect live status and remaining TTL of a delegation token. |
-| `poll_escalation` | `auth_req_id` | Poll status of a pending CIBA human-in-the-loop escalation request. |
+| `issue_mandate` | `principal_id`, `agent_id`, `authorization_details`, `ttl_seconds`, `api_key` | Issue a signed RFC 8693 delegation mandate token for an AI agent. |
+| `request_pass` | `mandate_token`, `pass_class`, `quantity`, `resource`, `spend`, `purpose`, `api_key` | Request Apple/Google Wallet pass issuance under a delegation token. |
+| `get_holder_passes` | `external_user_id`, `mandate_token`, `api_key` | Retrieve all active digital wallet passes held by a human principal. |
+| `lookup_pass` | `pass_id`, `api_key` | Query full details, status, and download URLs for a pass. |
+| `check_mandate_status` | `mandate_token`, `api_key` | Inspect live status and remaining TTL of a delegation token. |
+| `poll_escalation` | `auth_req_id`, `api_key` | Poll status of a pending CIBA human-in-the-loop escalation request. |
+| `respond_to_escalation` | `auth_req_id`, `approved`, `reason`, `api_key` | Approve or deny a pending CIBA human-in-the-loop escalation (Human Principal action). |
+| `revoke_mandate` | `jti`, `reason`, `api_key` | Revoke a mandate immediately by JTI, blocking any further enforcement under it. |
 
 ---
 
@@ -63,14 +65,15 @@ Claude Desktop automatically renders the visual pass card image inline in chat r
 
 ---
 
-## 🎁 Daily Free Pass Tier & Licensing
+## 🎁 Daily Pass Quota & Licensing
 
-* **100 Free Passes / Day**: Every installer/device receives **100 free pass issuances per day** automatically (`pass_mcp/rate_limiter.py`). No API key or credit card required!
-* **Unlimited Merchant Tier**: Set your `WALLETKIT_API_KEY` environment variable to connect to your live merchant account for unlimited pass signing:
+* **100 passes / day, per business**: `pass_mcp/rate_limiter.py` enforces a flat local quota of 100 pass issuances per day, tracked per merchant `api_key` (hashed, never stored in plaintext). With no key at all, the same 100/day quota applies per installer device instead. No API key or credit card required to try it out!
+* **Bring your own merchant account**: Set your `WALLETKIT_API_KEY` environment variable (or pass `api_key` per tool call) to connect to your live merchant account:
   ```env
   WALLETKIT_API_KEY=wk_live_abc123...
   WALLETKIT_API_URL=https://passera-service-production.up.railway.app
   ```
+  This is a client-side courtesy guard only — wallet-pass-api remains the source of truth for whether a key is actually valid and for any quota it enforces server-side.
 
 ---
 

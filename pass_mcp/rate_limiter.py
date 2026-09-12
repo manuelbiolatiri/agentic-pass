@@ -1,14 +1,15 @@
 import os
 import json
 import uuid
+import hashlib
 import datetime
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 CONFIG_DIR = Path.home() / ".pass_mcp"
 DEVICE_ID_FILE = CONFIG_DIR / "device_id"
 USAGE_FILE = CONFIG_DIR / "usage.json"
-DAILY_FREE_PASS_LIMIT = 100
+DAILY_PASS_LIMIT = 100
 
 def get_or_create_device_id() -> str:
     """Gets or generates a persistent device/installer UUID."""
@@ -22,38 +23,57 @@ def get_or_create_device_id() -> str:
     DEVICE_ID_FILE.write_text(new_id)
     return new_id
 
-def check_and_increment_rate_limit(has_api_key: bool = False) -> Tuple[bool, str]:
+def _identity_for(api_key: Optional[str], device_id: str) -> str:
+    """Buckets usage per business API key when one is supplied, falling back
+    to the local installer device otherwise. The key itself is never stored
+    on disk - only a truncated hash, so usage.json can't leak credentials.
+    A caller can no longer skip the quota just by passing a non-empty
+    string: any distinct string gets its own bucket, still capped, so a
+    garbage key doesn't buy unlimited local quota - it just wastes its own
+    100/day allowance before failing auth upstream.
     """
-    Checks if the current device/installer is allowed to issue a pass.
-    If has_api_key is True, bypasses local rate limit.
-    Otherwise, enforces hardcoded 10 passes per day.
-    """
-    if has_api_key:
-        return True, "API Key authenticated: Unlimited quota."
+    key = (api_key or "").strip()
+    if key:
+        digest = hashlib.sha256(key.encode()).hexdigest()[:16]
+        return f"key_{digest}"
+    return f"device_{device_id}"
 
+def check_and_increment_rate_limit(api_key: Optional[str] = None) -> Tuple[bool, str]:
+    """
+    Enforces a flat quota of DAILY_PASS_LIMIT (100) pass issuances per day,
+    per identity: per business API key when one is supplied, per local
+    installer device otherwise. This is a client-side courtesy guard only -
+    wallet-pass-api is the source of truth for whether a key is actually
+    valid and for any server-side quota it chooses to enforce.
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    today = datetime.date.today().isoformat()
     device_id = get_or_create_device_id()
+    identity = _identity_for(api_key, device_id)
+    today = datetime.date.today().isoformat()
 
-    usage_data = {"date": today, "count": 0, "device_id": device_id}
-
+    store = {}
     if USAGE_FILE.exists():
         try:
-            stored = json.loads(USAGE_FILE.read_text())
-            if stored.get("date") == today:
-                usage_data["count"] = stored.get("count", 0)
+            store = json.loads(USAGE_FILE.read_text())
+            if not isinstance(store, dict):
+                store = {}
         except Exception:
-            pass
+            store = {}
 
-    if usage_data["count"] >= DAILY_FREE_PASS_LIMIT:
+    bucket = store.get(identity) or {}
+    if bucket.get("date") != today:
+        bucket = {"date": today, "count": 0}
+
+    scope = "business" if (api_key or "").strip() else f"device {device_id}"
+
+    if bucket["count"] >= DAILY_PASS_LIMIT:
         return False, (
-            f"Daily free limit reached ({DAILY_FREE_PASS_LIMIT}/{DAILY_FREE_PASS_LIMIT} passes issued today for device {device_id}). "
-            f"Set WALLETKIT_API_KEY environment variable for unlimited pass issuance."
+            f"Daily limit reached ({DAILY_PASS_LIMIT}/{DAILY_PASS_LIMIT} passes issued today for {scope})."
         )
 
-    # Increment count
-    usage_data["count"] += 1
-    USAGE_FILE.write_text(json.dumps(usage_data, indent=2))
+    bucket["count"] += 1
+    store[identity] = bucket
+    USAGE_FILE.write_text(json.dumps(store, indent=2))
 
-    remaining = DAILY_FREE_PASS_LIMIT - usage_data["count"]
-    return True, f"Free daily pass issued ({usage_data['count']}/{DAILY_FREE_PASS_LIMIT} used today, {remaining} remaining)."
+    remaining = DAILY_PASS_LIMIT - bucket["count"]
+    return True, f"Pass issued ({bucket['count']}/{DAILY_PASS_LIMIT} used today for {scope}, {remaining} remaining)."

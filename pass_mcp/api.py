@@ -1,6 +1,7 @@
 import os
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pass_mcp.schemas import (
     IssueMandateRequest,
@@ -29,7 +30,7 @@ async def root():
     return {"status": "ok", "service": "pass-mcp-gateway"}
 
 @app.post("/api/v1/mandates/issue")
-async def issue_mandate(req: IssueMandateRequest):
+async def issue_mandate(req: IssueMandateRequest, x_api_key: Optional[str] = Header(None)):
     try:
         return await client.issue_mandate(
             principal_id=req.principal_id,
@@ -37,12 +38,13 @@ async def issue_mandate(req: IssueMandateRequest):
             authorization_details=[d.model_dump(by_alias=True, exclude_none=True) for d in req.authorization_details],
             agent_jkt=req.agent_jkt,
             ttl_seconds=req.ttl_seconds or 3600,
+            api_key=x_api_key,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/v1/mandates/enforce")
-async def enforce_request(req: EnforcePassRequest):
+async def enforce_request(req: EnforcePassRequest, x_api_key: Optional[str] = Header(None)):
     try:
         return await client.enforce_request(
             mandate_token=req.mandate_token,
@@ -52,14 +54,15 @@ async def enforce_request(req: EnforcePassRequest):
             spend=req.spend or 0,
             purpose=req.purpose,
             dpop_proof=req.dpop_proof,
+            api_key=x_api_key,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/mandates/status")
-async def check_status(token: str = Query(...)):
+async def check_status(token: str = Query(...), x_api_key: Optional[str] = Header(None)):
     try:
-        return await client.check_mandate_status(token)
+        return await client.check_mandate_status(token, api_key=x_api_key)
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
 
